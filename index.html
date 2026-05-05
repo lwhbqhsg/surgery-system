@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>排程管理系統 - 板橋分院</title>
+    <style>
+        body { font-family: "Microsoft JhengHei", sans-serif; background: #f0f2f5; padding: 20px; color: #333; }
+        .container { max-width: 1280px; margin: auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        .box { border: 1px solid #ddd; padding: 15px; border-radius: 8px; margin-bottom: 20px; background: white; }
+        .leave-box { background: #fffbfa; border-left: 5px solid #ff4d4f; }
+        .ai-box { background: #f0faff; border-left: 5px solid #1890ff; }
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 10px 0; align-items: end; }
+        input, select, textarea { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 14px; }
+        .label-small { font-size: 12px; color: #666; margin-bottom: 4px; display: block; font-weight: bold; }
+        .btn { padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        .btn-save { background: #27ae60; color: white; width: 100%; font-size: 16px; }
+        .calendar-header { display: flex; justify-content: space-between; align-items: center; margin: 10px 0; }
+        .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); border: 1px solid #eee; }
+        .cal-day-head { background: #f8f9fa; text-align: center; padding: 8px; font-weight: bold; border: 1px solid #eee; }
+        .cal-day { min-height: 90px; border: 1px solid #eee; padding: 5px; background: #fff; }
+        .cal-date-num { font-weight: bold; font-size: 14px; display: block; margin-bottom: 5px; }
+        .cal-leave-item { background: #ffccc7; color: #cf1322; padding: 2px 6px; border-radius: 3px; margin-bottom: 3px; font-size: 11px; display: flex; justify-content: space-between; align-items: center; }
+        .cal-delete-btn { cursor: pointer; font-weight: bold; padding: 0 4px; border-radius: 50%; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th { background: #f8f9fa; padding: 12px; border-bottom: 2px solid #dee2e6; text-align: left; }
+        td { padding: 12px; border-bottom: 1px solid #eee; }
+        .standby-row td { background-color: #fffbe6 !important; }
+        .date-divider td { background-color: #f1f3f4 !important; font-weight: bold; padding: 8px 15px !important; }
+        .loading { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(255,255,255,0.8); justify-content:center; align-items:center; z-index:9999; font-weight:bold; font-size: 20px; }
+    </style>
+</head>
+<body>
+
+<div id="loader" class="loading">⚙️ 同步資料中...</div>
+
+<div class="container">
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+        <!-- 請假與月曆 -->
+        <div class="box leave-box">
+            <div style="display: flex; justify-content: space-between;">
+                <strong>📅 醫師請假管理</strong>
+                <button class="btn" style="background:#ff4d4f; color:white; font-size: 12px;" onclick="toggleLeaveForm()">登記/撤銷假單</button>
+            </div>
+            
+            <div id="leaveForm" style="display:none; margin-top:15px; border-top:1px solid #eee; padding-top:15px;">
+                <div class="form-grid">
+                    <div style="grid-column: span 2;">
+                        <label class="label-small">醫師姓名</label>
+                        <!-- 新增 onfocus 點擊清空 -->
+                        <input type="text" id="leaveDocName" list="docOptions" onfocus="this.value=''">
+                    </div>
+                </div>
+                <div class="form-grid">
+                    <div><label class="label-small">開始日期</label><input type="date" id="leaveStartDate"></div>
+                    <div><label class="label-small">結束日期</label><input type="date" id="leaveEndDate"></div>
+                </div>
+                <div class="form-grid">
+                    <div>
+                        <label class="label-small">開始時間</label>
+                        <!-- 新增 onfocus 點擊清空 -->
+                        <select id="leaveStart" class="time-select" onfocus="this.selectedIndex=0"></select>
+                    </div>
+                    <div>
+                        <label class="label-small">結束時間</label>
+                        <!-- 新增 onfocus 點擊清空 -->
+                        <select id="leaveEnd" class="time-select" onfocus="this.selectedIndex=0"></select>
+                    </div>
+                </div>
+                <button class="btn" style="background:#ff4d4f; color:white; width:100%; margin-top:10px;" onclick="submitLeaveRange()">確認登記</button>
+            </div>
+
+            <div class="calendar-header">
+                <button class="btn" onclick="changeMonth(-1)">◀</button>
+                <strong id="calendarMonthTitle" style="font-size:18px;"></strong>
+                <button class="btn" onclick="changeMonth(1)">▶</button>
+            </div>
+            <div class="calendar-grid" id="calendarGrid"></div>
+        </div>
+
+        <!-- AI 解析 -->
+        <div class="box ai-box">
+            <strong>🤖 AI 快速解析</strong>
+            <textarea id="aiInput" rows="12" style="margin-top:10px;" placeholder="範例：5/6 0830-0900 王小明 A1234567 取卵 謝醫師..."></textarea>
+            <button class="btn" style="background:#1890ff; color:white; width:100%; margin-top:8px" onclick="aiParse()">解析至表單</button>
+        </div>
+    </div>
+
+    <!-- 手術表單 -->
+    <form id="scheduleForm" class="box">
+        <strong>✍️ 排程錄入</strong>
+        <input type="hidden" id="editId">
+        <div class="form-grid">
+            <div><label class="label-small">日期</label><input type="date" id="date" required></div>
+            <div><label class="label-small">開始時間</label><select id="startTime" class="time-select" required onchange="autoCalcEndTime()"></select></div>
+            <div><label class="label-small">結束時間</label><select id="endTime" class="time-select" required></select></div>
+            <div style="background: #fffbe6; padding: 8px; border-radius: 4px; border:1px solid #faad14;">
+                <input type="checkbox" id="isStandby" style="width:16px;"> <label for="isStandby" style="color:#d48806; font-weight:bold;">設為候補</label>
+            </div>
+        </div>
+        <div class="form-grid">
+            <div><label class="label-small">病人姓名</label><input type="text" id="patientName" required></div>
+            <div><label class="label-small">病歷號</label><input type="text" id="patientId" required></div>
+            <div>
+                <label class="label-small">手術項目</label>
+                <!-- 新增 onfocus 點擊清空 -->
+                <input type="text" id="surgeryName" list="surgeryOptions" required onchange="autoCalcEndTime()" onfocus="this.value=''">
+            </div>
+        </div>
+        <div class="form-grid">
+            <div>
+                <label class="label-small">主刀醫師</label>
+                <!-- 新增 onfocus 點擊清空 -->
+                <input type="text" id="leadSurgeon" list="docOptions" required onfocus="this.value=''">
+            </div>
+            <div>
+                <label class="label-small">主治醫師</label>
+                <!-- 新增 onfocus 點擊清空 -->
+                <input type="text" id="attendingDoc" list="docOptions" required onfocus="this.value=''">
+            </div>
+            <div><label class="label-small">備註</label><input type="text" id="notes"></div>
+        </div>
+        <button type="submit" id="saveBtn" class="btn btn-save">💾 儲存排程</button>
+        <button type="button" id="cancelBtn" class="btn" style="display:none; background:#bfbfbf; margin-top:5px; width:100%" onclick="resetForm()">取消</button>
+    </form>
+
+    <div class="box" style="background:#f8f9fa;">
+        <div class="form-grid" style="grid-template-columns: 1fr 1fr 2fr;">
+            <div><input type="date" id="startDate" onchange="renderTable()"></div>
+            <div><input type="date" id="endDate" onchange="renderTable()"></div>
+            <div><input type="text" id="searchBox" placeholder="搜尋姓名、醫師、手術..." oninput="renderTable()"></div>
+        </div>
+    </div>
+
+    <div style="overflow-x:auto;">
+        <table>
+            <thead>
+                <tr><th>日期</th><th>時間</th><th>病患</th><th>手術名稱</th><th>主刀/主治</th><th>備註</th><th>管理</th></tr>
+            </thead>
+            <tbody id="tableBody"></tbody>
+        </table>
+    </div>
+</div>
+
+<datalist id="docOptions">
+    <option value="趙光漢"><option value="吳明義"><option value="謝昀樵"><option value="馮敏">
+    <option value="李茂盛"><option value="李俊逸"><option value="林秉瑤"><option value="李毅評">
+    <option value="周佳謙"><option value="鄭功祥">
+</datalist>
+<datalist id="surgeryOptions">
+    <option value="取卵"><option value="TCR"><option value="速潔刀"><option value="卵巢PRP">
+    <option value="TCR-PRP"><option value="取精"><option value="HSC"><option value="HSG">
+    <option value="HSC+HSG"><option value="IUI"><option value="ET"><option value="IUI-PRP">
+</datalist>
+
+<script>
+    const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbz4NHDuzSF6mmaFwm7eTsHwKd7H-5dQgU41mWhNYjEVDHhIFC8yF2VfXPBQHsI6IwCMUA/exec"; 
+    let allSchedules = [], allLeaves = [];
+    let currentCalDate = new Date();
+
+    const surgeryDurations = {
+        "取卵": 30, "TCR": 60, "速潔刀": 60, "卵巢PRP": 60, "TCR-PRP": 60,
+        "取精": 120, "HSC": 20, "HSG": 20, "HSC+HSG": 20, "IUI": 20, "ET": 20, "IUI-PRP": 20
+    };
+
+    function initTimeSelects() {
+        const selects = document.querySelectorAll('.time-select');
+        let options = '<option value="">請選擇</option>';
+        for (let h = 8; h <= 16; h++) {
+            for (let m = 0; m < 60; m += 10) {
+                if (h === 8 && m < 30) continue;
+                if (h === 16 && m > 0) break;
+                const hh = h.toString().padStart(2, '0');
+                const mm = m.toString().padStart(2, '0');
+                options += `<option value="${hh}:${mm}">${hh}:${mm}</option>`;
+            }
+        }
+        selects.forEach(s => s.innerHTML = options);
+    }
+
+    async function fetchData() {
+        toggleLoader(true);
+        try {
+            const res = await fetch(WEB_APP_URL);
+            const data = await res.json();
+            allSchedules = data.schedules;
+            allLeaves = data.leaves;
+            renderCalendar();
+            renderTable();
+        } catch(e) { console.error(e); }
+        toggleLoader(false);
+    }
+
+    function renderCalendar() {
+        const grid = document.getElementById('calendarGrid');
+        const year = currentCalDate.getFullYear(), month = currentCalDate.getMonth();
+        document.getElementById('calendarMonthTitle').innerText = `${year}年 ${month + 1}月`;
+        grid.innerHTML = ['日','一','二','三','四','五','六'].map(d => `<div class="cal-day-head">${d}</div>`).join('');
+        const firstDay = new Date(year, month, 1).getDay();
+        const lastDate = new Date(year, month + 1, 0).getDate();
+        for (let i = 0; i < firstDay; i++) grid.innerHTML += `<div class="cal-day" style="background:#fafafa;"></div>`;
+        for (let d = 1; d <= lastDate; d++) {
+            const dStr = `${year}-${(month+1).toString().padStart(2,'0')}-${d.toString().padStart(2,'0')}`;
+            const dayLeaves = allLeaves.filter(l => l.date === dStr);
+            let html = dayLeaves.map(l => 
+                `<div class="cal-leave-item">
+                    <span>${l.name} ${l.start}-${l.end}</span>
+                    <span class="cal-delete-btn" onclick="deleteLeave('${l.id}')">×</span>
+                </div>`).join('');
+            grid.innerHTML += `<div class="cal-day"><span class="cal-date-num">${d}</span>${html}</div>`;
+        }
+    }
+
+    async function submitLeaveRange() {
+        const name = document.getElementById('leaveDocName').value, sDate = document.getElementById('leaveStartDate').value;
+        const eDate = document.getElementById('leaveEndDate').value || sDate, startT = document.getElementById('leaveStart').value, endT = document.getElementById('leaveEnd').value;
+        if(!name || !sDate || !startT || !endT) return alert("資訊不完整");
+        toggleLoader(true);
+        let curr = new Date(sDate), last = new Date(eDate);
+        while(curr <= last) {
+            const dStr = curr.toISOString().split('T')[0];
+            const leaveId = "LV_" + Date.now() + "_" + Math.floor(Math.random()*1000);
+            await fetch(WEB_APP_URL, { method: 'POST', body: JSON.stringify({
+                action: 'addLeave', id: leaveId, name: name, date: dStr, 
+                start: (dStr === sDate ? startT : "08:30"), end: (dStr === eDate ? endT : "16:00")
+            })});
+            curr.setDate(curr.getDate() + 1);
+        }
+        await fetchData();
+        toggleLeaveForm();
+    }
+
+    async function deleteLeave(id) {
+        if(!confirm("確定取消此請假？")) return;
+        toggleLoader(true);
+        await fetch(WEB_APP_URL, { method: 'POST', body: JSON.stringify({ action: 'deleteLeave', id: id.toString() })});
+        await fetchData();
+    }
+
+    function renderTable() {
+        const search = document.getElementById('searchBox').value.toLowerCase();
+        const sD = document.getElementById('startDate').value, eD = document.getElementById('endDate').value;
+        let filtered = allSchedules.filter(item => {
+            const content = (item.patientName + item.patientId + item.surgeryName + item.leadSurgeon + item.attendingDoc).toLowerCase();
+            return content.includes(search) && (!sD || item.date >= sD) && (!eD || item.date <= eD);
+        });
+        filtered.sort((a,b) => (a.date+a.startTime).localeCompare(b.date+b.startTime));
+        let html = "", lastD = "";
+        filtered.forEach(item => {
+            if(item.date !== lastD) { lastD = item.date; html += `<tr class="date-divider"><td colspan="7">📅 ${item.date}</td></tr>`; }
+            html += `<tr class="${(item.isStandby === 'true') ? 'standby-row' : ''}">
+                <td>${item.date}</td><td><b>${item.startTime}-${item.endTime}</b></td>
+                <td><b>${item.patientName}</b><br><small>${item.patientId}</small></td>
+                <td>${item.surgeryName}</td><td>${item.leadSurgeon} / ${item.attendingDoc}</td>
+                <td>${item.notes || ''}</td>
+                <td><button onclick="startEdit('${item.id}')">改</button> <button onclick="deleteItem('${item.id}')">刪</button></td>
+            </tr>`;
+        });
+        document.getElementById('tableBody').innerHTML = html;
+    }
+
+    document.getElementById('scheduleForm').onsubmit = async (e) => {
+        e.preventDefault();
+        const id = document.getElementById('editId').value || "S_" + Date.now();
+        toggleLoader(true);
+        await fetch(WEB_APP_URL, { method: 'POST', body: JSON.stringify({
+            action: document.getElementById('editId').value ? 'update' : 'add',
+            id: id, date: document.getElementById('date').value, startTime: document.getElementById('startTime').value, endTime: document.getElementById('endTime').value,
+            patientName: document.getElementById('patientName').value, patientId: document.getElementById('patientId').value, surgeryName: document.getElementById('surgeryName').value,
+            leadSurgeon: document.getElementById('leadSurgeon').value, attendingDoc: document.getElementById('attendingDoc').value, notes: document.getElementById('notes').value,
+            isStandby: document.getElementById('isStandby').checked.toString()
+        })});
+        resetForm(); await fetchData();
+    };
+
+    function startEdit(id) {
+        const item = allSchedules.find(i => i.id === id);
+        if(!item) return;
+        ['editId','date','startTime','endTime','patientName','patientId','surgeryName','leadSurgeon','attendingDoc','notes'].forEach(k => {
+            if(document.getElementById(k)) document.getElementById(k).value = item[k] || "";
+        });
+        document.getElementById('isStandby').checked = (item.isStandby === 'true');
+        document.getElementById('saveBtn').innerText = "🔄 更新排程";
+        document.getElementById('cancelBtn').style.display = "block";
+        window.scrollTo(0,0);
+    }
+
+    async function deleteItem(id) {
+        if(!confirm("確定刪除？")) return;
+        toggleLoader(true);
+        await fetch(WEB_APP_URL, { method: 'POST', body: JSON.stringify({ action: 'delete', id: id.toString() })});
+        await fetchData();
+    }
+
+    function aiParse() {
+        const t = document.getElementById('aiInput').value.trim(), w = t.split(/\s+/);
+        if(w.length < 5) return alert("格式不正確");
+        const dMatch = w[0].match(/(\d{1,2})[\/\-](\d{1,2})/);
+        if(dMatch) document.getElementById('date').value = `${new Date().getFullYear()}-${dMatch[1].padStart(2,'0')}-${dMatch[2].padStart(2,'0')}`;
+        const tMatch = w[1].match(/(\d{2})(\d{2})\s*[\-~]\s*(\d{2})(\d{2})/);
+        if(tMatch) { 
+            document.getElementById('startTime').value = `${tMatch[1]}:${tMatch[2]}`; 
+            document.getElementById('endTime').value = (parseInt(tMatch[3]) >= 16 && parseInt(tMatch[4]) > 0) ? "16:00" : `${tMatch[3]}:${tMatch[4]}`;
+        }
+        document.getElementById('patientName').value = w[2];
+        document.getElementById('patientId').value = w[3];
+        document.getElementById('surgeryName').value = w[4];
+        if(w[5]) document.getElementById('leadSurgeon').value = w[5];
+        if(w[6]) document.getElementById('attendingDoc').value = w[6];
+        if(w.length > 7) document.getElementById('notes').value = w.slice(7).join(' ');
+    }
+
+    function autoCalcEndTime() {
+        const s = document.getElementById('startTime').value, n = document.getElementById('surgeryName').value, d = surgeryDurations[n];
+        if(s && d) {
+            const [h, m] = s.split(':').map(Number);
+            const dt = new Date(); dt.setHours(h, m + d);
+            let rH = dt.getHours(), rM = dt.getMinutes();
+            if(rH > 16 || (rH === 16 && rM > 0)) { rH = 16; rM = 0; }
+            document.getElementById('endTime').value = `${rH.toString().padStart(2,'0')}:${rM.toString().padStart(2,'0')}`;
+        }
+    }
+
+    function changeMonth(o) { currentCalDate.setMonth(currentCalDate.getMonth() + o); renderCalendar(); }
+    function toggleLeaveForm() { const s = document.getElementById('leaveForm').style; s.display = (s.display === 'none' ? 'block' : 'none'); }
+    function toggleLoader(v) { document.getElementById('loader').style.display = v ? 'flex' : 'none'; }
+    function resetForm() { document.getElementById('scheduleForm').reset(); document.getElementById('editId').value = ""; document.getElementById('saveBtn').innerText = "💾 儲存排程"; document.getElementById('cancelBtn').style.display = "none"; }
+
+    window.onload = () => { initTimeSelects(); fetchData(); };
+</script>
+</body>
+</html>
